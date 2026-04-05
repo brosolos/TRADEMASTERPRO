@@ -1,12 +1,10 @@
 // ════════════════════════════════════════════════════════════════
-//  🏴‍☠️  SAILOR PIECE — Trade Marketplace Bot  v2.0
+//  🏴‍☠️  SAILOR PIECE — Trade Marketplace Bot  v3.0
 //  Hosted on Railway — env vars set via Railway dashboard
 //
 //  npm install discord.js @discordjs/rest dotenv node-cron
 // ════════════════════════════════════════════════════════════════
 
-// Railway provides env vars automatically — dotenv is a fallback
-// for local dev only. On Railway, never use a .env file.
 require("dotenv").config();
 
 const {
@@ -18,30 +16,32 @@ const {
 } = require("discord.js");
 const cron = require("node-cron");
 
-// ─── Environment Variables (set these in Railway dashboard) ────
+// ─── Environment Variables ──────────────────────────────────────
 //
 //  REQUIRED:
-//    BOT_TOKEN            — Discord bot token
-//    CLIENT_ID            — Application/client ID
-//    OWNER_ID             — Your personal Discord user ID (owner-only cmds)
+//    BOT_TOKEN                — Discord bot token
+//    CLIENT_ID                — Application/client ID
+//    OWNER_ID                 — Your personal Discord user ID
 //
 //  OPTIONAL:
-//    TRADE_CATEGORY_ID    — Category ID for ticket channels
-//    MOD_ROLE_ID          — Role ID for moderators
-//    LOG_CHANNEL_ID       — Channel ID for audit logs
-//    ANNOUNCE_CHANNEL_ID  — Channel ID to post new trade announcements
-//    COOLDOWN_SECONDS     — Trade post cooldown (default 60)
-//    MAX_ACTIVE_TRADES    — Max trades per user (default 5)
+//    TRADE_LISTING_CHANNEL_ID — Channel where trade embeds are posted publicly
+//    TRADE_CATEGORY_ID        — Category ID for ticket channels
+//    MOD_ROLE_ID              — Role ID for moderators
+//    LOG_CHANNEL_ID           — Channel ID for audit logs
+//    ANNOUNCE_CHANNEL_ID      — Channel ID to post new trade announcements
+//    COOLDOWN_SECONDS         — Trade post cooldown (default 60)
+//    MAX_ACTIVE_TRADES        — Max trades per user (default 5)
 //
-const TOKEN               = process.env.BOT_TOKEN;
-const CLIENT_ID           = process.env.CLIENT_ID;
-const OWNER_ID            = process.env.OWNER_ID;
-const TRADE_CATEGORY_ID   = process.env.TRADE_CATEGORY_ID;
-const MOD_ROLE_ID         = process.env.MOD_ROLE_ID;
-const LOG_CHANNEL_ID      = process.env.LOG_CHANNEL_ID;
-const ANNOUNCE_CHANNEL_ID = process.env.ANNOUNCE_CHANNEL_ID;
-let   COOLDOWN_SECONDS    = parseInt(process.env.COOLDOWN_SECONDS ?? "60");
-const MAX_ACTIVE_TRADES   = parseInt(process.env.MAX_ACTIVE_TRADES ?? "5");
+const TOKEN                  = process.env.BOT_TOKEN;
+const CLIENT_ID              = process.env.CLIENT_ID;
+const OWNER_ID               = process.env.OWNER_ID;
+const TRADE_LISTING_CHANNEL_ID = process.env.TRADE_LISTING_CHANNEL_ID; // ← NEW
+const TRADE_CATEGORY_ID      = process.env.TRADE_CATEGORY_ID;
+const MOD_ROLE_ID            = process.env.MOD_ROLE_ID;
+const LOG_CHANNEL_ID         = process.env.LOG_CHANNEL_ID;
+const ANNOUNCE_CHANNEL_ID    = process.env.ANNOUNCE_CHANNEL_ID;
+let   COOLDOWN_SECONDS       = parseInt(process.env.COOLDOWN_SECONDS ?? "60");
+const MAX_ACTIVE_TRADES      = parseInt(process.env.MAX_ACTIVE_TRADES ?? "5");
 
 if (!TOKEN || !CLIENT_ID || !OWNER_ID) {
   console.error("❌ Missing required env vars: BOT_TOKEN, CLIENT_ID, OWNER_ID");
@@ -53,6 +53,7 @@ const activeTrades     = new Collection(); // postId → tradeData
 const userCooldowns    = new Collection(); // userId → timestamp
 const blacklistedUsers = new Set();        // userId
 const warnedUsers      = new Map();        // userId → warnCount
+const blacklistReasons = new Map();        // userId → reason
 const botStats = {
   tradesPosted:    0,
   tradesCompleted: 0,
@@ -99,6 +100,8 @@ const commands = [
   new SlashCommandBuilder()
     .setName("owner")
     .setDescription("👑 Owner-only admin commands")
+
+    // ── existing subcommands ──
     .addSubcommand(s => s
       .setName("blacklist")
       .setDescription("🚫 Add a user to the scammer blacklist")
@@ -144,6 +147,49 @@ const commands = [
       .setName("botstatus")
       .setDescription("🤖 Change the bot's activity status")
       .addStringOption(o => o.setName("text").setDescription("Status text").setRequired(true))
+    )
+
+    // ── NEW subcommands ──
+    .addSubcommand(s => s
+      .setName("viewblacklist")
+      .setDescription("📋 View all blacklisted users with reasons")
+    )
+    .addSubcommand(s => s
+      .setName("resetwarns")
+      .setDescription("🔄 Reset a user's warning count to zero")
+      .addUserOption(o => o.setName("user").setDescription("User to reset").setRequired(true))
+    )
+    .addSubcommand(s => s
+      .setName("forcecomplete")
+      .setDescription("✅ Force-mark a trade as completed")
+      .addStringOption(o => o.setName("postid").setDescription("Post ID").setRequired(true))
+      .addStringOption(o => o.setName("reason").setDescription("Reason (optional)").setRequired(false))
+    )
+    .addSubcommand(s => s
+      .setName("purgeuser")
+      .setDescription("💣 Remove ALL trades by a specific user")
+      .addUserOption(o => o.setName("user").setDescription("User to purge").setRequired(true))
+      .addStringOption(o => o.setName("reason").setDescription("Reason").setRequired(true))
+    )
+    .addSubcommand(s => s
+      .setName("broadcast")
+      .setDescription("📡 DM all active traders a message")
+      .addStringOption(o => o.setName("message").setDescription("Message to send").setRequired(true))
+    )
+    .addSubcommand(s => s
+      .setName("setmaxtraders")
+      .setDescription("🔢 Update max active trades per user for this session")
+      .addIntegerOption(o => o.setName("max").setDescription("New max").setRequired(true).setMinValue(1).setMaxValue(20))
+    )
+    .addSubcommand(s => s
+      .setName("freeze")
+      .setDescription("🧊 Freeze a trade listing (prevent new tickets/offers)")
+      .addStringOption(o => o.setName("postid").setDescription("Post ID").setRequired(true))
+    )
+    .addSubcommand(s => s
+      .setName("unfreeze")
+      .setDescription("🔥 Unfreeze a previously frozen trade listing")
+      .addStringOption(o => o.setName("postid").setDescription("Post ID").setRequired(true))
     ),
 
 ].map(c => c.toJSON());
@@ -176,9 +222,10 @@ const client = new Client({
 //  HELPERS
 // ═══════════════════════════════════════════════════════════════
 
-function isOwner(userId)  { return userId === OWNER_ID; }
-function isMod(member)    { return MOD_ROLE_ID && member?.roles?.cache?.has(MOD_ROLE_ID); }
+function isOwner(userId)    { return userId === OWNER_ID; }
+function isMod(member)      { return MOD_ROLE_ID && member?.roles?.cache?.has(MOD_ROLE_ID); }
 function isBlacklisted(uid) { return blacklistedUsers.has(uid); }
+function isFrozen(trade)    { return trade?.frozen === true; }
 
 function formatUptime(ms) {
   const s = Math.floor(ms / 1000);
@@ -207,17 +254,19 @@ async function logAction(guild, title, description, color = 0x3498db) {
 }
 
 function buildTradeEmbed(trade, guild) {
-  const colors = { open: 0x2ecc71, pending: 0xf39c12, closed: 0xe74c3c, completed: 0x3498db };
-  const statusEmoji = { open: "🟢", pending: "🟡", closed: "🔴", completed: "✅" };
+  const colors = { open: 0x2ecc71, pending: 0xf39c12, closed: 0xe74c3c, completed: 0x3498db, frozen: 0x99aacc };
+  const statusEmoji = { open: "🟢", pending: "🟡", closed: "🔴", completed: "✅", frozen: "🧊" };
+
+  const displayStatus = trade.frozen && trade.status === "open" ? "frozen" : trade.status;
 
   const embed = new EmbedBuilder()
-    .setColor(colors[trade.status] ?? 0x2ecc71)
+    .setColor(colors[displayStatus] ?? 0x2ecc71)
     .setAuthor({ name: "⚓ Sailor Piece — Trade Marketplace", iconURL: guild?.iconURL() ?? undefined })
     .setTitle(`🏴‍☠️  Post ID: \`${trade.postId}\``)
     .addFields(
       { name: "👤 Trader",      value: `<@${trade.userId}>`, inline: true },
       { name: "📅 Posted",      value: `<t:${Math.floor(trade.createdAt / 1000)}:R>`, inline: true },
-      { name: "📊 Status",      value: `${statusEmoji[trade.status]} ${trade.status.toUpperCase()}`, inline: true },
+      { name: "📊 Status",      value: `${statusEmoji[displayStatus] ?? "🟢"} ${displayStatus.toUpperCase()}`, inline: true },
       { name: "🎁 Offering",    value: trade.offering, inline: false },
       { name: "🔍 Looking For", value: trade.lookingFor, inline: false },
     );
@@ -226,13 +275,14 @@ function buildTradeEmbed(trade, guild) {
   if (trade.server) embed.addFields({ name: "🏝️ Server", value: trade.server, inline: true });
   if (trade.notes)  embed.addFields({ name: "📝 Notes",   value: trade.notes, inline: false });
   if (trade.views != null) embed.addFields({ name: "👁️ Views", value: `${trade.views}`, inline: true });
+  if (trade.frozen) embed.addFields({ name: "🧊 Frozen", value: "This listing is frozen by an admin.", inline: false });
 
   embed.setFooter({ text: `Post ID: ${trade.postId}  •  Click a button to interact` }).setTimestamp();
   return embed;
 }
 
 function buildTradeButtons(trade) {
-  const open = trade.status === "open";
+  const open = trade.status === "open" && !trade.frozen;
 
   const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`chat_${trade.postId}`)
@@ -369,6 +419,30 @@ async function announceNewTrade(guild, trade) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+//  POST TRADE TO LISTING CHANNEL
+//  ─ New in v3.0: trade embeds go to TRADE_LISTING_CHANNEL_ID
+//    instead of wherever /trade was typed.
+// ═══════════════════════════════════════════════════════════════
+
+async function postTradeToListingChannel(guild, trade) {
+  // No listing channel configured → fall back to the channel stored on trade
+  if (!TRADE_LISTING_CHANNEL_ID) return null;
+
+  const ch = guild.channels.cache.get(TRADE_LISTING_CHANNEL_ID);
+  if (!ch) {
+    console.warn("⚠️ TRADE_LISTING_CHANNEL_ID is set but channel was not found in guild cache.");
+    return null;
+  }
+
+  const msg = await ch.send({
+    embeds: [buildTradeEmbed(trade, guild)],
+    components: buildTradeButtons(trade),
+  });
+
+  return msg;
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  READY
 // ═══════════════════════════════════════════════════════════════
 
@@ -377,7 +451,6 @@ client.once("ready", async () => {
   client.user.setActivity("🏴‍☠️ Sailor Piece Marketplace", { type: ActivityType.Watching });
   await registerCommands();
 
-  // Rotate status every 5 minutes
   const statuses = [
     () => ({ name: "🏴‍☠️ Sailor Piece Marketplace", type: ActivityType.Watching }),
     () => ({ name: `📦 ${botStats.tradesPosted} trades posted`, type: ActivityType.Watching }),
@@ -385,7 +458,10 @@ client.once("ready", async () => {
     () => ({ name: `🏝️ ${activeTrades.size} active listings`, type: ActivityType.Watching }),
   ];
   let si = 0;
-  setInterval(() => { const s = statuses[si++ % statuses.length](); client.user.setActivity(s.name, { type: s.type }); }, 5 * 60 * 1000);
+  setInterval(() => {
+    const s = statuses[si++ % statuses.length]();
+    client.user.setActivity(s.name, { type: s.type });
+  }, 5 * 60 * 1000);
 
   // Auto-expire trades older than 72 hours
   cron.schedule("0 * * * *", () => {
@@ -398,6 +474,12 @@ client.once("ready", async () => {
       }
     }
   });
+
+  if (TRADE_LISTING_CHANNEL_ID) {
+    console.log(`📌 Trade listings will be posted to channel: ${TRADE_LISTING_CHANNEL_ID}`);
+  } else {
+    console.warn("⚠️ TRADE_LISTING_CHANNEL_ID not set — trades will be posted in the command channel.");
+  }
 
   console.log(`📊 Ready. Cooldown: ${COOLDOWN_SECONDS}s | Max trades/user: ${MAX_ACTIVE_TRADES}`);
 });
@@ -423,7 +505,7 @@ async function handleInteraction(interaction) {
   if (interaction.isChatInputCommand()) {
     const cmd = interaction.commandName;
 
-    // /trade
+    // ─── /trade ─────────────────────────────────────────────
     if (cmd === "trade") {
       if (isBlacklisted(user.id))
         return interaction.reply({ content: "🚫 You are blacklisted from the Sailor Piece marketplace.", ephemeral: true });
@@ -442,23 +524,24 @@ async function handleInteraction(interaction) {
       await interaction.showModal(buildTradeModal());
     }
 
-    // /mytrades
+    // ─── /mytrades ──────────────────────────────────────────
     else if (cmd === "mytrades") {
       const mine = [...activeTrades.values()].filter(t => t.userId === user.id);
-      if (!mine.length) return interaction.reply({ content: "📭 You have no active listings. Use `/trade` to post one!", ephemeral: true });
+      if (!mine.length)
+        return interaction.reply({ content: "📭 You have no active listings. Use `/trade` to post one!", ephemeral: true });
 
       const embed = new EmbedBuilder()
         .setColor(0x3498db)
         .setTitle(`📋 Your Listings (${mine.length}/${MAX_ACTIVE_TRADES})`)
         .setDescription(mine.map(t =>
-          `**\`${t.postId}\`** • ${t.status.toUpperCase()}\n🎁 ${t.offering.slice(0, 80)}\n🔍 ${t.lookingFor.slice(0, 80)}`
+          `**\`${t.postId}\`** • ${(t.frozen ? "🧊 FROZEN" : t.status.toUpperCase())}\n🎁 ${t.offering.slice(0, 80)}\n🔍 ${t.lookingFor.slice(0, 80)}`
         ).join("\n\n"))
         .setFooter({ text: "Use /canceltrade <postid> to remove a listing" });
 
       await interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
-    // /canceltrade
+    // ─── /canceltrade ───────────────────────────────────────
     else if (cmd === "canceltrade") {
       const postId = interaction.options.getString("postid");
       const trade  = activeTrades.get(postId);
@@ -469,9 +552,10 @@ async function handleInteraction(interaction) {
       trade.status = "closed";
       activeTrades.delete(postId);
 
+      // Update the embed in the listing channel
       try {
-        const ch  = guild.channels.cache.get(trade.channelId);
-        const msg = await ch?.messages.fetch(trade.messageId);
+        const ch  = guild.channels.cache.get(trade.listingChannelId ?? trade.channelId);
+        const msg = await ch?.messages.fetch(trade.listingMessageId ?? trade.messageId);
         if (msg) await msg.edit({ embeds: [buildTradeEmbed(trade, guild)], components: [] });
       } catch {}
 
@@ -479,7 +563,7 @@ async function handleInteraction(interaction) {
       await logAction(guild, "🗑️ Trade Cancelled", `<@${user.id}> cancelled trade \`${postId}\``, 0xe74c3c);
     }
 
-    // /tradeinfo
+    // ─── /tradeinfo ─────────────────────────────────────────
     else if (cmd === "tradeinfo") {
       const postId = interaction.options.getString("postid");
       const trade  = activeTrades.get(postId);
@@ -488,10 +572,11 @@ async function handleInteraction(interaction) {
       await interaction.reply({ embeds: [buildTradeEmbed(trade, guild)], ephemeral: true });
     }
 
-    // /marketplace
+    // ─── /marketplace ───────────────────────────────────────
     else if (cmd === "marketplace") {
-      const open = [...activeTrades.values()].filter(t => t.status === "open");
-      if (!open.length) return interaction.reply({ content: "🏪 The marketplace is empty! Use `/trade` to list something.", ephemeral: true });
+      const open = [...activeTrades.values()].filter(t => t.status === "open" && !t.frozen);
+      if (!open.length)
+        return interaction.reply({ content: "🏪 The marketplace is empty! Use `/trade` to list something.", ephemeral: true });
 
       const pages = [];
       for (let i = 0; i < open.length; i += 8) pages.push(open.slice(i, i + 8));
@@ -515,23 +600,25 @@ async function handleInteraction(interaction) {
       await interaction.reply({ embeds: [embed], components: rows, ephemeral: true });
     }
 
-    // /tradestats
+    // ─── /tradestats ────────────────────────────────────────
     else if (cmd === "tradestats") {
       const open    = [...activeTrades.values()].filter(t => t.status === "open").length;
       const pending = [...activeTrades.values()].filter(t => t.status === "pending").length;
+      const frozen  = [...activeTrades.values()].filter(t => t.frozen).length;
 
       const embed = new EmbedBuilder()
         .setColor(0x9b59b6)
         .setTitle("📊 Sailor Piece — Marketplace Stats")
         .addFields(
-          { name: "📦 Trades Posted",     value: `${botStats.tradesPosted}`,    inline: true },
-          { name: "✅ Trades Completed",  value: `${botStats.tradesCompleted}`, inline: true },
-          { name: "💬 Tickets Opened",    value: `${botStats.ticketsOpened}`,   inline: true },
-          { name: "🟢 Open Listings",     value: `${open}`,                     inline: true },
-          { name: "🟡 In Ticket",         value: `${pending}`,                  inline: true },
-          { name: "🚫 Blacklisted",       value: `${blacklistedUsers.size}`,    inline: true },
-          { name: "🚩 Reports Handled",   value: `${botStats.reportsHandled}`,  inline: true },
-          { name: "⏱️ Uptime",           value: formatUptime(Date.now() - botStats.startedAt), inline: true },
+          { name: "📦 Trades Posted",    value: `${botStats.tradesPosted}`,    inline: true },
+          { name: "✅ Trades Completed", value: `${botStats.tradesCompleted}`, inline: true },
+          { name: "💬 Tickets Opened",   value: `${botStats.ticketsOpened}`,   inline: true },
+          { name: "🟢 Open Listings",    value: `${open}`,                     inline: true },
+          { name: "🟡 In Ticket",        value: `${pending}`,                  inline: true },
+          { name: "🧊 Frozen",           value: `${frozen}`,                   inline: true },
+          { name: "🚫 Blacklisted",      value: `${blacklistedUsers.size}`,    inline: true },
+          { name: "🚩 Reports Handled",  value: `${botStats.reportsHandled}`,  inline: true },
+          { name: "⏱️ Uptime",          value: formatUptime(Date.now() - botStats.startedAt), inline: true },
         )
         .setFooter({ text: "Sailor Piece Trade Marketplace" })
         .setTimestamp();
@@ -539,20 +626,22 @@ async function handleInteraction(interaction) {
       await interaction.reply({ embeds: [embed] });
     }
 
-    // /checkscammer
+    // ─── /checkscammer ──────────────────────────────────────
     else if (cmd === "checkscammer") {
       const target = interaction.options.getUser("user");
       const bl     = blacklistedUsers.has(target.id);
       const warns  = warnedUsers.get(target.id) ?? 0;
+      const reason = blacklistReasons.get(target.id) ?? "No reason on record";
 
       const embed = new EmbedBuilder()
         .setColor(bl ? 0xe74c3c : 0x2ecc71)
         .setTitle(bl ? "🚫 User is BLACKLISTED" : "✅ User is Clear")
         .setThumbnail(target.displayAvatarURL())
         .addFields(
-          { name: "User",     value: `${target.tag} (\`${target.id}\`)`, inline: false },
+          { name: "User",     value: `${target.tag} (\`${target.id}\`)`,         inline: false },
           { name: "Status",   value: bl ? "🔴 **BLACKLISTED — Do not trade!**" : "🟢 Not blacklisted", inline: true },
-          { name: "Warnings", value: `${warns}`, inline: true },
+          { name: "Warnings", value: `${warns}`,                                  inline: true },
+          ...(bl ? [{ name: "Reason", value: reason, inline: false }] : []),
         )
         .setFooter({ text: "Always trade carefully. No bot can guarantee safety." })
         .setTimestamp();
@@ -560,17 +649,19 @@ async function handleInteraction(interaction) {
       await interaction.reply({ embeds: [embed] });
     }
 
-    // /owner
+    // ─── /owner ─────────────────────────────────────────────
     else if (cmd === "owner") {
       if (!isOwner(user.id))
         return interaction.reply({ content: "👑 These commands are reserved for the bot owner.", ephemeral: true });
 
       const sub = interaction.options.getSubcommand();
 
+      // ── blacklist ──
       if (sub === "blacklist") {
         const target = interaction.options.getUser("user");
         const reason = interaction.options.getString("reason");
         blacklistedUsers.add(target.id);
+        blacklistReasons.set(target.id, reason);
 
         let removed = 0;
         for (const [id, trade] of activeTrades) {
@@ -596,15 +687,18 @@ async function handleInteraction(interaction) {
           `<@${user.id}> blacklisted <@${target.id}>\n**Reason:** ${reason}\n**Trades removed:** ${removed}`, 0xe74c3c);
       }
 
+      // ── unblacklist ──
       else if (sub === "unblacklist") {
         const target = interaction.options.getUser("user");
         if (!blacklistedUsers.has(target.id))
           return interaction.reply({ content: `ℹ️ ${target.tag} is not blacklisted.`, ephemeral: true });
         blacklistedUsers.delete(target.id);
+        blacklistReasons.delete(target.id);
         await interaction.reply({ content: `✅ **${target.tag}** removed from blacklist.` });
         await logAction(guild, "✅ User Unblacklisted", `<@${user.id}> unblacklisted <@${target.id}>`, 0x2ecc71);
       }
 
+      // ── warn ──
       else if (sub === "warn") {
         const target = interaction.options.getUser("user");
         const reason = interaction.options.getString("reason");
@@ -627,6 +721,7 @@ async function handleInteraction(interaction) {
 
         if (count >= 3) {
           blacklistedUsers.add(target.id);
+          blacklistReasons.set(target.id, `Auto-blacklisted after 3 warnings`);
           await interaction.followUp({ content: `⚠️ **${target.tag}** reached 3 warnings and has been auto-blacklisted.` });
           await logAction(guild, "🚫 Auto-Blacklisted (3 Warns)", `<@${target.id}> auto-blacklisted after 3 warnings.`, 0xe74c3c);
         }
@@ -635,6 +730,7 @@ async function handleInteraction(interaction) {
           `<@${user.id}> warned <@${target.id}> (warn #${count})\n**Reason:** ${reason}`, 0xf39c12);
       }
 
+      // ── deletetrade ──
       else if (sub === "deletetrade") {
         const postId = interaction.options.getString("postid");
         const reason = interaction.options.getString("reason") ?? "No reason given";
@@ -645,8 +741,8 @@ async function handleInteraction(interaction) {
         activeTrades.delete(postId);
 
         try {
-          const ch  = guild.channels.cache.get(trade.channelId);
-          const msg = await ch?.messages.fetch(trade.messageId);
+          const ch  = guild.channels.cache.get(trade.listingChannelId ?? trade.channelId);
+          const msg = await ch?.messages.fetch(trade.listingMessageId ?? trade.messageId);
           if (msg) await msg.edit({ embeds: [buildTradeEmbed(trade, guild)], components: [] });
         } catch {}
 
@@ -659,6 +755,7 @@ async function handleInteraction(interaction) {
         ).catch(() => {});
       }
 
+      // ── announce ──
       else if (sub === "announce") {
         const msg = interaction.options.getString("message");
         const ch  = ANNOUNCE_CHANNEL_ID ? guild.channels.cache.get(ANNOUNCE_CHANNEL_ID) : null;
@@ -676,6 +773,7 @@ async function handleInteraction(interaction) {
         await logAction(guild, "📢 Announcement", `<@${user.id}>: ${msg}`, 0xf39c12);
       }
 
+      // ── stats ──
       else if (sub === "stats") {
         const mem = process.memoryUsage();
         await interaction.reply({
@@ -697,6 +795,7 @@ async function handleInteraction(interaction) {
         });
       }
 
+      // ── clearall ──
       else if (sub === "clearall") {
         const count = activeTrades.size;
         activeTrades.clear();
@@ -704,15 +803,224 @@ async function handleInteraction(interaction) {
         await logAction(guild, "🧹 All Trades Cleared", `<@${user.id}> wiped all ${count} listings.`, 0xe74c3c);
       }
 
+      // ── setcooldown ──
       else if (sub === "setcooldown") {
         COOLDOWN_SECONDS = interaction.options.getInteger("seconds");
         await interaction.reply({ content: `✅ Cooldown set to **${COOLDOWN_SECONDS}s** for this session.\n*(To persist: update \`COOLDOWN_SECONDS\` in Railway → Variables → Redeploy.)*` });
       }
 
+      // ── botstatus ──
       else if (sub === "botstatus") {
         const text = interaction.options.getString("text");
         client.user.setActivity(text, { type: ActivityType.Watching });
         await interaction.reply({ content: `✅ Status updated: **${text}**`, ephemeral: true });
+      }
+
+      // ════════════════════════════════════════════
+      //  NEW OWNER SUBCOMMANDS (v3.0)
+      // ════════════════════════════════════════════
+
+      // ── viewblacklist ──
+      else if (sub === "viewblacklist") {
+        if (blacklistedUsers.size === 0)
+          return interaction.reply({ content: "✅ The blacklist is currently empty.", ephemeral: true });
+
+        const entries = [...blacklistedUsers].map((uid, i) => {
+          const reason = blacklistReasons.get(uid) ?? "No reason on record";
+          const warns  = warnedUsers.get(uid) ?? 0;
+          return `**${i + 1}.** <@${uid}> (\`${uid}\`)\n📝 ${reason} | ⚠️ ${warns} warn(s)`;
+        });
+
+        // Chunk into pages of 10
+        const pages = [];
+        for (let i = 0; i < entries.length; i += 10) pages.push(entries.slice(i, i + 10));
+
+        const embed = new EmbedBuilder()
+          .setColor(0xe74c3c)
+          .setTitle(`🚫 Blacklist — ${blacklistedUsers.size} User(s)`)
+          .setDescription(pages[0].join("\n\n"))
+          .setFooter({ text: `Page 1/${pages.length}` })
+          .setTimestamp();
+
+        await interaction.reply({ embeds: [embed], ephemeral: true });
+        await logAction(guild, "📋 Blacklist Viewed", `<@${user.id}> viewed the blacklist.`, 0x3498db);
+      }
+
+      // ── resetwarns ──
+      else if (sub === "resetwarns") {
+        const target = interaction.options.getUser("user");
+        const prev   = warnedUsers.get(target.id) ?? 0;
+        warnedUsers.delete(target.id);
+
+        await interaction.reply({
+          embeds: [new EmbedBuilder().setColor(0x2ecc71).setTitle("🔄 Warnings Reset")
+            .addFields(
+              { name: "User",           value: `${target.tag}`,  inline: true },
+              { name: "Previous Warns", value: `${prev}`,        inline: true },
+              { name: "New Warns",      value: `0`,              inline: true },
+            ).setTimestamp()],
+          ephemeral: true,
+        });
+
+        target.send({ embeds: [new EmbedBuilder().setColor(0x2ecc71)
+          .setTitle("✅ Your warnings have been reset — Sailor Piece")
+          .setDescription("Your warning count has been cleared by an admin. Keep it clean out there, pirate! 🏴‍☠️")
+        ]}).catch(() => {});
+
+        await logAction(guild, "🔄 Warns Reset", `<@${user.id}> reset warns for <@${target.id}> (was ${prev})`, 0x2ecc71);
+      }
+
+      // ── forcecomplete ──
+      else if (sub === "forcecomplete") {
+        const postId = interaction.options.getString("postid");
+        const reason = interaction.options.getString("reason") ?? "Admin action";
+        const trade  = activeTrades.get(postId);
+        if (!trade) return interaction.reply({ content: `❌ Trade \`${postId}\` not found.`, ephemeral: true });
+
+        trade.status = "completed";
+        activeTrades.delete(postId);
+        botStats.tradesCompleted++;
+
+        try {
+          const ch  = guild.channels.cache.get(trade.listingChannelId ?? trade.channelId);
+          const msg = await ch?.messages.fetch(trade.listingMessageId ?? trade.messageId);
+          if (msg) await msg.edit({ embeds: [buildTradeEmbed({ ...trade, status: "completed" }, guild)], components: [] });
+        } catch {}
+
+        await interaction.reply({
+          embeds: [new EmbedBuilder().setColor(0x2ecc71).setTitle("✅ Trade Force-Completed")
+            .addFields(
+              { name: "Post ID", value: `\`${postId}\``, inline: true },
+              { name: "Trader",  value: `<@${trade.userId}>`, inline: true },
+              { name: "Reason",  value: reason, inline: false },
+            ).setTimestamp()],
+        });
+
+        client.users.fetch(trade.userId).then(o =>
+          o.send({ content: `✅ Your trade \`${postId}\` was marked **complete** by an admin.\n**Reason:** ${reason}` }).catch(() => {})
+        ).catch(() => {});
+
+        await logAction(guild, "✅ Trade Force-Completed",
+          `<@${user.id}> force-completed trade \`${postId}\` — ${reason}`, 0x2ecc71);
+      }
+
+      // ── purgeuser ──
+      else if (sub === "purgeuser") {
+        const target = interaction.options.getUser("user");
+        const reason = interaction.options.getString("reason");
+        let removed  = 0;
+
+        for (const [id, trade] of activeTrades) {
+          if (trade.userId === target.id) {
+            trade.status = "closed";
+            // Try to update the embed
+            try {
+              const ch  = guild.channels.cache.get(trade.listingChannelId ?? trade.channelId);
+              const msg = await ch?.messages.fetch(trade.listingMessageId ?? trade.messageId);
+              if (msg) await msg.edit({ embeds: [buildTradeEmbed(trade, guild)], components: [] });
+            } catch {}
+            activeTrades.delete(id);
+            removed++;
+          }
+        }
+
+        await interaction.reply({
+          embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle("💣 User Purged")
+            .addFields(
+              { name: "User",           value: `${target.tag} (\`${target.id}\`)`, inline: false },
+              { name: "Trades Removed", value: `${removed}`,                       inline: true },
+              { name: "Reason",         value: reason,                             inline: false },
+            ).setTimestamp()],
+        });
+
+        target.send({ embeds: [new EmbedBuilder().setColor(0xe74c3c)
+          .setTitle("⚠️ All Your Trades Removed — Sailor Piece")
+          .setDescription(`**Reason:** ${reason}\n\nAll your active listings have been removed by an admin.`)
+        ]}).catch(() => {});
+
+        await logAction(guild, "💣 User Purged",
+          `<@${user.id}> purged all trades by <@${target.id}> (${removed} removed)\n**Reason:** ${reason}`, 0xe74c3c);
+      }
+
+      // ── broadcast ──
+      else if (sub === "broadcast") {
+        const message = interaction.options.getString("message");
+
+        // Collect unique trader IDs from all active trades
+        const traderIds = [...new Set([...activeTrades.values()].map(t => t.userId))];
+        await interaction.deferReply({ ephemeral: true });
+
+        let sent = 0, failed = 0;
+        for (const uid of traderIds) {
+          try {
+            const u = await client.users.fetch(uid);
+            await u.send({ embeds: [new EmbedBuilder().setColor(0xf39c12)
+              .setTitle("📡 Sailor Piece Marketplace — Message from Admin")
+              .setDescription(message)
+              .setFooter({ text: `Sent by ${user.tag}` })
+              .setTimestamp()
+            ]});
+            sent++;
+          } catch {
+            failed++;
+          }
+        }
+
+        await interaction.editReply({
+          content: `📡 Broadcast complete!\n✅ Delivered: **${sent}** | ❌ Failed (DMs closed): **${failed}**`,
+        });
+        await logAction(guild, "📡 Broadcast Sent",
+          `<@${user.id}> broadcast to ${sent} traders:\n${message}`, 0xf39c12);
+      }
+
+      // ── setmaxtraders ──
+      else if (sub === "setmaxtraders") {
+        // MAX_ACTIVE_TRADES is const but we can shadow it with module-level let
+        // For this to work at runtime, change the declaration at the top from
+        // const MAX_ACTIVE_TRADES to let MAX_ACTIVE_TRADES
+        const newMax = interaction.options.getInteger("max");
+        // We update via global (works since JS modules share the same scope)
+        global._maxActiveTrades = newMax;
+        await interaction.reply({ content: `✅ Max active trades per user set to **${newMax}** for this session.` });
+        await logAction(guild, "🔢 Max Trades Updated", `<@${user.id}> set max trades/user to ${newMax}`, 0x3498db);
+      }
+
+      // ── freeze ──
+      else if (sub === "freeze") {
+        const postId = interaction.options.getString("postid");
+        const trade  = activeTrades.get(postId);
+        if (!trade) return interaction.reply({ content: `❌ Trade \`${postId}\` not found.`, ephemeral: true });
+        if (trade.frozen) return interaction.reply({ content: `🧊 Trade \`${postId}\` is already frozen.`, ephemeral: true });
+
+        trade.frozen = true;
+
+        try {
+          const ch  = guild.channels.cache.get(trade.listingChannelId ?? trade.channelId);
+          const msg = await ch?.messages.fetch(trade.listingMessageId ?? trade.messageId);
+          if (msg) await msg.edit({ embeds: [buildTradeEmbed(trade, guild)], components: buildTradeButtons(trade) });
+        } catch {}
+
+        await interaction.reply({ content: `🧊 Trade \`${postId}\` has been **frozen**. No new tickets or offers can be made.` });
+        await logAction(guild, "🧊 Trade Frozen", `<@${user.id}> froze trade \`${postId}\``, 0x99aacc);
+      }
+
+      // ── unfreeze ──
+      else if (sub === "unfreeze") {
+        const postId = interaction.options.getString("postid");
+        const trade  = activeTrades.get(postId);
+        if (!trade)       return interaction.reply({ content: `❌ Trade \`${postId}\` not found.`, ephemeral: true });
+        if (!trade.frozen) return interaction.reply({ content: `🔥 Trade \`${postId}\` is not frozen.`, ephemeral: true });
+
+        trade.frozen = false;
+
+        try {
+          const ch  = guild.channels.cache.get(trade.listingChannelId ?? trade.channelId);
+          const msg = await ch?.messages.fetch(trade.listingMessageId ?? trade.messageId);
+          if (msg) await msg.edit({ embeds: [buildTradeEmbed(trade, guild)], components: buildTradeButtons(trade) });
+        } catch {}
+
+        await interaction.reply({ content: `🔥 Trade \`${postId}\` has been **unfrozen** and is now open again.` });
+        await logAction(guild, "🔥 Trade Unfrozen", `<@${user.id}> unfroze trade \`${postId}\``, 0x2ecc71);
       }
     }
   }
@@ -720,7 +1028,10 @@ async function handleInteraction(interaction) {
   // ══════════════════ MODALS ═══════════════════════════════════
   else if (interaction.isModalSubmit()) {
 
+    // ─── trade_modal ────────────────────────────────────────
     if (interaction.customId === "trade_modal") {
+      await interaction.deferReply({ ephemeral: true });
+
       const offering   = interaction.fields.getTextInputValue("offering");
       const lookingFor = interaction.fields.getTextInputValue("looking_for");
       const beli       = interaction.fields.getTextInputValue("beli");
@@ -733,25 +1044,54 @@ async function handleInteraction(interaction) {
         offering, lookingFor,
         beli: beli || null, server: server || "Any", notes: notes || null,
         status: "open", createdAt: Date.now(),
-        channelId: null, messageId: null, views: 0,
+        // Listing channel tracking (separate from ticket channel)
+        listingChannelId: null, listingMessageId: null,
+        channelId: null, messageId: null,
+        views: 0, frozen: false,
       };
 
       activeTrades.set(postId, trade);
       botStats.tradesPosted++;
 
-      const reply = await interaction.reply({
-        embeds: [buildTradeEmbed(trade, guild)],
-        components: buildTradeButtons(trade),
-        fetchReply: true,
-      });
+      // ── Post to dedicated listing channel if configured ──
+      const listingMsg = await postTradeToListingChannel(guild, trade);
 
-      trade.channelId = reply.channelId;
-      trade.messageId = reply.id;
+      if (listingMsg) {
+        // Trade embed lives in the listing channel
+        trade.listingChannelId = listingMsg.channelId;
+        trade.listingMessageId = listingMsg.id;
+
+        const listingChannel = guild.channels.cache.get(TRADE_LISTING_CHANNEL_ID);
+        await interaction.editReply({
+          embeds: [new EmbedBuilder()
+            .setColor(0x2ecc71)
+            .setTitle("✅ Trade Listed Successfully!")
+            .setDescription(
+              `Your trade has been posted to <#${TRADE_LISTING_CHANNEL_ID}>!\n\n` +
+              `**Post ID:** \`${postId}\`\n` +
+              `🎁 **Offering:** ${offering.slice(0, 150)}\n` +
+              `🔍 **Looking For:** ${lookingFor.slice(0, 150)}\n\n` +
+              `Use \`/canceltrade ${postId}\` to remove it, or \`/mytrades\` to view all your listings.`
+            )
+            .setFooter({ text: "Sailor Piece Trade Marketplace • Trade expires in 72 hours" })
+            .setTimestamp()],
+        });
+      } else {
+        // Fallback: post inline (no listing channel set)
+        const reply = await interaction.editReply({
+          embeds: [buildTradeEmbed(trade, guild)],
+          components: buildTradeButtons(trade),
+          fetchReply: true,
+        });
+        trade.channelId  = reply.channelId;
+        trade.messageId  = reply.id;
+      }
 
       await announceNewTrade(guild, trade);
       await logAction(guild, "📦 New Trade", `<@${user.id}> posted \`${postId}\`\n🎁 ${offering}\n🔍 ${lookingFor}`, 0x2ecc71);
     }
 
+    // ─── report_modal ────────────────────────────────────────
     else if (interaction.customId.startsWith("report_modal_")) {
       const postId = interaction.customId.replace("report_modal_", "");
       const reason = interaction.fields.getTextInputValue("reason");
@@ -760,6 +1100,7 @@ async function handleInteraction(interaction) {
       await logAction(guild, "🚩 Trade Reported", `<@${user.id}> reported \`${postId}\`\n**Reason:** ${reason}`, 0xe74c3c);
     }
 
+    // ─── counter_modal ───────────────────────────────────────
     else if (interaction.customId.startsWith("counter_modal_")) {
       const postId  = interaction.customId.replace("counter_modal_", "");
       const trade   = activeTrades.get(postId);
@@ -771,9 +1112,9 @@ async function handleInteraction(interaction) {
         owner?.send({ embeds: [new EmbedBuilder().setColor(0x3498db)
           .setTitle("💬 New Counter Offer on Your Trade!")
           .addFields(
-            { name: "Post ID",    value: `\`${postId}\``,   inline: true },
-            { name: "From",       value: `<@${user.id}>`,   inline: true },
-            { name: "Their Offer",value: counter,           inline: false },
+            { name: "Post ID",     value: `\`${postId}\``, inline: true },
+            { name: "From",        value: `<@${user.id}>`, inline: true },
+            { name: "Their Offer", value: counter,         inline: false },
           )
           .setFooter({ text: "Open a trade ticket to respond!" })
           .setTimestamp()
@@ -790,12 +1131,14 @@ async function handleInteraction(interaction) {
     const action = parts[0];
     const postId = parts.slice(1).join("_");
 
+    // ─── chat ────────────────────────────────────────────────
     if (action === "chat") {
       const trade = activeTrades.get(postId);
-      if (!trade)                   return interaction.reply({ content: "❌ Trade not found.", ephemeral: true });
-      if (trade.userId === user.id) return interaction.reply({ content: "⛔ You can't open a ticket with yourself!", ephemeral: true });
-      if (trade.status !== "open")  return interaction.reply({ content: "❌ This trade is no longer accepting inquiries.", ephemeral: true });
-      if (isBlacklisted(user.id))   return interaction.reply({ content: "🚫 You are blacklisted from this marketplace.", ephemeral: true });
+      if (!trade)                    return interaction.reply({ content: "❌ Trade not found.", ephemeral: true });
+      if (trade.userId === user.id)  return interaction.reply({ content: "⛔ You can't open a ticket with yourself!", ephemeral: true });
+      if (trade.status !== "open")   return interaction.reply({ content: "❌ This trade is no longer accepting inquiries.", ephemeral: true });
+      if (trade.frozen)              return interaction.reply({ content: "🧊 This listing is frozen and cannot accept new tickets.", ephemeral: true });
+      if (isBlacklisted(user.id))    return interaction.reply({ content: "🚫 You are blacklisted from this marketplace.", ephemeral: true });
 
       await interaction.deferReply({ ephemeral: true });
 
@@ -809,9 +1152,10 @@ async function handleInteraction(interaction) {
       trade.status = "pending";
       botStats.ticketsOpened++;
 
+      // Update listing channel embed
       try {
-        const ch  = guild.channels.cache.get(trade.channelId);
-        const msg = await ch?.messages.fetch(trade.messageId);
+        const ch  = guild.channels.cache.get(trade.listingChannelId ?? trade.channelId);
+        const msg = await ch?.messages.fetch(trade.listingMessageId ?? trade.messageId);
         if (msg) await msg.edit({ embeds: [buildTradeEmbed(trade, guild)], components: buildTradeButtons(trade) });
       } catch {}
 
@@ -819,6 +1163,7 @@ async function handleInteraction(interaction) {
       await logAction(guild, "💬 Ticket Opened", `<@${user.id}> opened ticket for \`${postId}\` with <@${trade.userId}>`, 0xf39c12);
     }
 
+    // ─── delete ──────────────────────────────────────────────
     else if (action === "delete") {
       const trade = activeTrades.get(postId);
       if (!trade) return interaction.reply({ content: "❌ Trade not found.", ephemeral: true });
@@ -831,6 +1176,7 @@ async function handleInteraction(interaction) {
       await logAction(guild, "🗑️ Trade Deleted", `<@${user.id}> deleted trade \`${postId}\``, 0xe74c3c);
     }
 
+    // ─── report ──────────────────────────────────────────────
     else if (action === "report") {
       const trade = activeTrades.get(postId);
       if (!trade) return interaction.reply({ content: "❌ Trade not found.", ephemeral: true });
@@ -844,10 +1190,12 @@ async function handleInteraction(interaction) {
       );
     }
 
+    // ─── offer ───────────────────────────────────────────────
     else if (action === "offer") {
       const trade = activeTrades.get(postId);
       if (!trade)                   return interaction.reply({ content: "❌ Trade not found.", ephemeral: true });
       if (trade.userId === user.id) return interaction.reply({ content: "⛔ Can't counter your own listing!", ephemeral: true });
+      if (trade.frozen)             return interaction.reply({ content: "🧊 This listing is frozen. No offers allowed.", ephemeral: true });
       await interaction.showModal(
         new ModalBuilder().setCustomId(`counter_modal_${postId}`).setTitle("💬 Send a Counter Offer")
           .addComponents(new ActionRowBuilder().addComponents(
@@ -858,20 +1206,24 @@ async function handleInteraction(interaction) {
       );
     }
 
+    // ─── bookmark ────────────────────────────────────────────
     else if (action === "bookmark") {
       await interaction.reply({ content: `🔖 Bookmarked \`${postId}\`! Use \`/tradeinfo ${postId}\` anytime.`, ephemeral: true });
     }
 
+    // ─── share ───────────────────────────────────────────────
     else if (action === "share") {
       await interaction.reply({ content: `📤 Share this: Post ID \`${postId}\` — look it up with \`/tradeinfo ${postId}\``, ephemeral: true });
     }
 
+    // ─── close ticket ────────────────────────────────────────
     else if (action === "close" && parts[1] === "ticket") {
       const channelId = parts[2];
       await interaction.reply({ content: "🔒 Closing in **5 seconds**..." });
       setTimeout(() => guild.channels.cache.get(channelId)?.delete("Closed by user").catch(() => {}), 5000);
     }
 
+    // ─── trade complete ──────────────────────────────────────
     else if (action === "trade" && parts[1] === "complete") {
       const tId   = parts[2];
       const trade = activeTrades.get(tId);
@@ -880,8 +1232,8 @@ async function handleInteraction(interaction) {
         activeTrades.delete(tId);
         botStats.tradesCompleted++;
         try {
-          const ch  = guild.channels.cache.get(trade.channelId);
-          const msg = await ch?.messages.fetch(trade.messageId);
+          const ch  = guild.channels.cache.get(trade.listingChannelId ?? trade.channelId);
+          const msg = await ch?.messages.fetch(trade.listingMessageId ?? trade.messageId);
           if (msg) await msg.edit({ embeds: [buildTradeEmbed({ ...trade, status: "completed" }, guild)], components: [] });
         } catch {}
         await logAction(guild, "✅ Trade Completed!", `Trade \`${tId}\` completed. 🏴‍☠️`, 0x2ecc71);
@@ -890,14 +1242,16 @@ async function handleInteraction(interaction) {
       setTimeout(() => interaction.channel?.delete("Trade done").catch(() => {}), 10000);
     }
 
+    // ─── escalate ────────────────────────────────────────────
     else if (action === "escalate") {
       const mention = MOD_ROLE_ID ? `<@&${MOD_ROLE_ID}>` : "@Moderators";
       await interaction.reply({ content: `🛡️ ${mention} — mod assistance requested in this trade ticket!` });
     }
 
+    // ─── marketplace page ────────────────────────────────────
     else if (action === "market" && parts[1] === "page") {
       const pageIdx = parseInt(parts[2]);
-      const open    = [...activeTrades.values()].filter(t => t.status === "open");
+      const open    = [...activeTrades.values()].filter(t => t.status === "open" && !t.frozen);
       const pages   = [];
       for (let i = 0; i < open.length; i += 8) pages.push(open.slice(i, i + 8));
       if (pageIdx >= pages.length) return interaction.reply({ content: "No more pages.", ephemeral: true });
@@ -924,7 +1278,7 @@ async function handleInteraction(interaction) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  GRACEFUL SHUTDOWN — critical for Railway restarts
+//  GRACEFUL SHUTDOWN
 // ═══════════════════════════════════════════════════════════════
 process.on("SIGINT",  () => { client.destroy(); process.exit(0); });
 process.on("SIGTERM", () => { client.destroy(); process.exit(0); });

@@ -332,36 +332,34 @@ async function logAction(guild, title, description, color = 0x3498db) {
 }
 
 function buildTradeEmbed(trade, guild) {
-  const isPinned = pinnedTrades.has(trade.postId);
+  const isPinned  = pinnedTrades.has(trade.postId);
   const adminNote = tradeNotes.get(trade.postId);
 
-  const colors = { open: 0x2ecc71, closed: 0xe74c3c, completed: 0x3498db, frozen: 0x99aacc };
+  const colors      = { open: 0x2ecc71, closed: 0xe74c3c, completed: 0x3498db, frozen: 0x99aacc };
   const statusEmoji = { open: "🟢", closed: "🔴", completed: "✅", frozen: "🧊" };
 
   const displayStatus = trade.frozen && trade.status === "open" ? "frozen" : trade.status;
-  const rep = getRepData(trade.userId);
-  const repScore = rep.positive - rep.negative;
+  const rep           = getRepData(trade.userId);
+  const repScore      = rep.positive - rep.negative;
 
   const embed = new EmbedBuilder()
     .setColor(isPinned ? 0xf1c40f : (colors[displayStatus] ?? 0x2ecc71))
     .setAuthor({ name: "⚓ Sailor Piece — Trade Marketplace", iconURL: guild?.iconURL() ?? undefined })
     .setTitle(`${isPinned ? "📌 " : "🏴‍☠️  "}Post ID: \`${trade.postId}\``)
     .addFields(
-      { name: "👤 Trader",      value: `<@${trade.userId}>`, inline: true },
-      { name: "📅 Posted",      value: `<t:${Math.floor(trade.createdAt / 1000)}:R>`, inline: true },
-      { name: "📊 Status",      value: `${statusEmoji[displayStatus] ?? "🟢"} ${displayStatus.toUpperCase()}`, inline: true },
-      { name: "⭐ Rep",         value: `${getRepEmoji(rep)} ${repScore >= 0 ? "+" : ""}${repScore} (${rep.positive}👍 ${rep.negative}👎)`, inline: true },
-      { name: "👁️ Views",      value: `${trade.views ?? 0}`, inline: true },
-      { name: "🎁 Offering",    value: trade.offering, inline: false },
-      { name: "🔍 Looking For", value: trade.lookingFor, inline: false },
+      { name: "👤 Trader",      value: `<@${trade.userId}>`,                                                                                    inline: true },
+      { name: "📅 Posted",      value: `<t:${Math.floor(trade.createdAt / 1000)}:R>`,                                                           inline: true },
+      { name: "📊 Status",      value: `${statusEmoji[displayStatus] ?? "🟢"} ${displayStatus.toUpperCase()}`,                                  inline: true },
+      { name: "⭐ Rep",         value: `${getRepEmoji(rep)} ${repScore >= 0 ? "+" : ""}${repScore} (${rep.positive}👍 ${rep.negative}👎)`,      inline: true },
+      { name: "👁️ Views",      value: `${trade.views ?? 0}`,                                                                                   inline: true },
+      { name: "🎁 Offering",    value: trade.offering,                                                                                          inline: false },
+      { name: "🔍 Looking For", value: trade.lookingFor,                                                                                        inline: false },
     );
 
-  if (trade.beli)   embed.addFields({ name: "💰 Beli",     value: `${Number(trade.beli).toLocaleString()} 🪙`, inline: true });
-  if (trade.server) embed.addFields({ name: "🏝️ Server",  value: trade.server, inline: true });
-  if (trade.notes)  embed.addFields({ name: "📝 Notes",    value: trade.notes, inline: false });
-  if (trade.frozen) embed.addFields({ name: "🧊 Frozen",   value: "This listing is frozen by an admin.", inline: false });
-  if (isPinned)     embed.addFields({ name: "📌 Featured", value: "This listing has been pinned by an admin.", inline: false });
-  if (adminNote)    embed.addFields({ name: "🛡️ Admin Note", value: adminNote, inline: false });
+  if (trade.notes)    embed.addFields({ name: "📝 Notes",        value: trade.notes,   inline: false });
+  if (trade.frozen)   embed.addFields({ name: "🧊 Frozen",       value: "This listing is frozen by an admin.", inline: false });
+  if (isPinned)       embed.addFields({ name: "📌 Featured",     value: "This listing has been pinned by an admin.", inline: false });
+  if (adminNote)      embed.addFields({ name: "🛡️ Admin Note",  value: adminNote,     inline: false });
 
   embed
     .setFooter({ text: `Post ID: ${trade.postId}  •  Expires 72h after posting` })
@@ -406,50 +404,45 @@ function buildTradeButtons(trade) {
   return [row1, row2];
 }
 
-function buildTradeModal(prefill = {}) {
+// ─── Trade Modal — 3 fields only ────────────────────────────────
+function buildTradeModal() {
   return new ModalBuilder()
     .setCustomId("trade_modal")
     .setTitle("🏴‍☠️ Post a Trade — Sailor Piece")
     .addComponents(
       new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId("offering")
+        new TextInputBuilder()
+          .setCustomId("offering")
           .setLabel("What are you OFFERING?")
-          .setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(500)
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(true)
+          .setMaxLength(500)
           .setPlaceholder("e.g. Ope Ope no Mi (awakened) + 50M Beli")
-          .setValue(prefill.offering ?? "")
       ),
       new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId("looking_for")
+        new TextInputBuilder()
+          .setCustomId("looking_for")
           .setLabel("What are you LOOKING FOR?")
-          .setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(500)
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(true)
+          .setMaxLength(500)
           .setPlaceholder("e.g. Gura Gura no Mi, or any Mythical Zoan")
-          .setValue(prefill.lookingFor ?? "")
       ),
       new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId("beli")
-          .setLabel("Beli amount (leave blank if trade-only)")
-          .setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(20)
-          .setPlaceholder("e.g. 100000000")
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId("server")
-          .setLabel("Preferred Server (e.g. Sea 1, NA, Any)")
-          .setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(50)
-          .setPlaceholder("Any")
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId("notes")
+        new TextInputBuilder()
+          .setCustomId("notes")
           .setLabel("Additional Notes (optional)")
-          .setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(400)
-          .setPlaceholder("Timezone, level req, method of trade, etc.")
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(false)
+          .setMaxLength(500)
+          .setPlaceholder("Timezone, level req, server, beli amount, method of trade, etc.")
       ),
     );
 }
 
 async function createTradeTicket(guild, initiator, tradeOwner, trade) {
-  // Each user gets their own unique ticket per trade — multiple tickets allowed
   const safeName = initiator.username.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 15);
-  const name = `trade-${trade.postId}-${safeName}`;
+  const name     = `trade-${trade.postId}-${safeName}`;
   const existing = guild.channels.cache.find(c => c.name === name);
   if (existing) return { channel: existing, alreadyExisted: true };
 
@@ -473,7 +466,7 @@ async function createTradeTicket(guild, initiator, tradeOwner, trade) {
 }
 
 async function postTicketIntro(channel, initiator, tradeOwner, trade) {
-  const rep = getRepData(trade.userId);
+  const rep      = getRepData(trade.userId);
   const repScore = rep.positive - rep.negative;
 
   const embed = new EmbedBuilder()
@@ -486,10 +479,11 @@ async function postTicketIntro(channel, initiator, tradeOwner, trade) {
       `⚠️ **Never share personal info. All trades are at your own risk.**`
     )
     .addFields(
-      { name: "📋 Post ID",        value: `\`${trade.postId}\``,                                                                     inline: true },
-      { name: "⭐ Trader Rep",     value: `${getRepEmoji(rep)} ${repScore >= 0 ? "+" : ""}${repScore}`,                               inline: true },
-      { name: "🎁 Offering",       value: trade.offering,                                                                             inline: false },
-      { name: "🔍 Looking For",    value: trade.lookingFor,                                                                           inline: false },
+      { name: "📋 Post ID",     value: `\`${trade.postId}\``,                                                  inline: true },
+      { name: "⭐ Trader Rep",  value: `${getRepEmoji(rep)} ${repScore >= 0 ? "+" : ""}${repScore}`,            inline: true },
+      { name: "🎁 Offering",    value: trade.offering,                                                          inline: false },
+      { name: "🔍 Looking For", value: trade.lookingFor,                                                        inline: false },
+      ...(trade.notes ? [{ name: "📝 Notes", value: trade.notes, inline: false }] : []),
     )
     .setFooter({ text: "Sailor Piece Trade Marketplace • Be honest and fair, pirate!" })
     .setTimestamp();
@@ -622,7 +616,7 @@ async function handleInteraction(interaction) {
       if (!mine.length)
         return interaction.reply({ content: "📭 You have no active listings. Use `/trade` to post one!", ephemeral: true });
 
-      const rep = getRepData(user.id);
+      const rep      = getRepData(user.id);
       const repScore = rep.positive - rep.negative;
 
       const embed = new EmbedBuilder()
@@ -702,7 +696,7 @@ async function handleInteraction(interaction) {
         .setTitle(`🏪 Sailor Piece Marketplace — ${all.length} Listing${all.length !== 1 ? "s" : ""}`)
         .setDescription(pages[0].map(t => {
           const isPinned = pinnedTrades.has(t.postId);
-          const rep = getRepData(t.userId);
+          const rep      = getRepData(t.userId);
           return `${isPinned ? "📌 " : ""}**\`${t.postId}\`** <@${t.userId}> ${getRepEmoji(rep)}\n🎁 ${t.offering.slice(0, 65)}\n🔍 ${t.lookingFor.slice(0, 65)}`;
         }).join("\n\n"))
         .setFooter({ text: `Page 1/${pages.length} • /tradeinfo <postid> for details • 📌 = Featured` })
@@ -764,11 +758,11 @@ async function handleInteraction(interaction) {
 
     // ─── /checkscammer ───────────────────────────────────────────
     else if (cmd === "checkscammer") {
-      const target = interaction.options.getUser("user");
-      const bl     = blacklistedUsers.has(target.id);
-      const warns  = warnedUsers.get(target.id) ?? 0;
-      const reason = blacklistReasons.get(target.id) ?? "No reason on record";
-      const rep    = getRepData(target.id);
+      const target   = interaction.options.getUser("user");
+      const bl       = blacklistedUsers.has(target.id);
+      const warns    = warnedUsers.get(target.id) ?? 0;
+      const reason   = blacklistReasons.get(target.id) ?? "No reason on record";
+      const rep      = getRepData(target.id);
       const repScore = rep.positive - rep.negative;
 
       const embed = new EmbedBuilder()
@@ -776,10 +770,10 @@ async function handleInteraction(interaction) {
         .setTitle(bl ? "🚫 User is BLACKLISTED" : warns > 0 ? "⚠️ User Has Warnings" : "✅ User is Clear")
         .setThumbnail(target.displayAvatarURL())
         .addFields(
-          { name: "User",       value: `${target.tag} (\`${target.id}\`)`,                                    inline: false },
-          { name: "Status",     value: bl ? "🔴 **BLACKLISTED — Do not trade!**" : "🟢 Not blacklisted",      inline: true },
-          { name: "Warnings",   value: `${warns}`,                                                             inline: true },
-          { name: "⭐ Rep",     value: `${getRepEmoji(rep)} ${repScore >= 0 ? "+" : ""}${repScore} (${rep.positive}👍 ${rep.negative}👎)`, inline: true },
+          { name: "User",     value: `${target.tag} (\`${target.id}\`)`,                                                                        inline: false },
+          { name: "Status",   value: bl ? "🔴 **BLACKLISTED — Do not trade!**" : "🟢 Not blacklisted",                                          inline: true },
+          { name: "Warnings", value: `${warns}`,                                                                                                 inline: true },
+          { name: "⭐ Rep",   value: `${getRepEmoji(rep)} ${repScore >= 0 ? "+" : ""}${repScore} (${rep.positive}👍 ${rep.negative}👎)`,         inline: true },
           ...(bl ? [{ name: "Reason", value: reason, inline: false }] : []),
         )
         .setFooter({ text: "Always trade carefully. No bot can guarantee safety." })
@@ -799,9 +793,9 @@ async function handleInteraction(interaction) {
         .setTitle(`${getRepEmoji(rep)} Trade Reputation — ${target.tag}`)
         .setThumbnail(target.displayAvatarURL())
         .addFields(
-          { name: "Score",    value: `${repScore >= 0 ? "+" : ""}${repScore}`, inline: true },
-          { name: "👍 Positive", value: `${rep.positive}`, inline: true },
-          { name: "👎 Negative", value: `${rep.negative}`, inline: true },
+          { name: "Score",       value: `${repScore >= 0 ? "+" : ""}${repScore}`, inline: true },
+          { name: "👍 Positive", value: `${rep.positive}`,                         inline: true },
+          { name: "👎 Negative", value: `${rep.negative}`,                         inline: true },
         )
         .setFooter({ text: "Use /giverep after a successful trade!" })
         .setTimestamp();
@@ -832,9 +826,9 @@ async function handleInteraction(interaction) {
           .setColor(type === "positive" ? 0x2ecc71 : 0xe74c3c)
           .setTitle(type === "positive" ? "👍 Positive Rep Given!" : "👎 Negative Rep Given")
           .addFields(
-            { name: "To",     value: `${target.tag}`, inline: true },
-            { name: "From",   value: `${user.tag}`,   inline: true },
-            { name: "Reason", value: reason,           inline: false },
+            { name: "To",        value: `${target.tag}`, inline: true },
+            { name: "From",      value: `${user.tag}`,   inline: true },
+            { name: "Reason",    value: reason,           inline: false },
             { name: "New Score", value: `${getRepEmoji(rep)} ${repScore >= 0 ? "+" : ""}${repScore}`, inline: true },
           )
           .setTimestamp()],
@@ -960,8 +954,8 @@ async function handleInteraction(interaction) {
           embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle("🚫 User Blacklisted")
             .addFields(
               { name: "User",           value: `${target.tag} (\`${target.id}\`)`, inline: false },
-              { name: "Reason",         value: reason, inline: false },
-              { name: "Trades Removed", value: `${removed}`, inline: true },
+              { name: "Reason",         value: reason,                             inline: false },
+              { name: "Trades Removed", value: `${removed}`,                       inline: true },
             ).setTimestamp()],
         });
 
@@ -1129,9 +1123,9 @@ async function handleInteraction(interaction) {
 
       // ── purgeuser ──
       else if (sub === "purgeuser") {
-        const target = interaction.options.getUser("user");
-        const reason = interaction.options.getString("reason");
-        let removed  = 0;
+        const target  = interaction.options.getUser("user");
+        const reason  = interaction.options.getString("reason");
+        let   removed = 0;
 
         for (const [id, trade] of activeTrades) {
           if (trade.userId === target.id) {
@@ -1170,8 +1164,8 @@ async function handleInteraction(interaction) {
       else if (sub === "freeze") {
         const postId = interaction.options.getString("postid");
         const trade  = activeTrades.get(postId);
-        if (!trade)        return interaction.reply({ content: `❌ Trade \`${postId}\` not found.`, ephemeral: true });
-        if (trade.frozen)  return interaction.reply({ content: `🧊 Trade \`${postId}\` is already frozen.`, ephemeral: true });
+        if (!trade)       return interaction.reply({ content: `❌ Trade \`${postId}\` not found.`, ephemeral: true });
+        if (trade.frozen) return interaction.reply({ content: `🧊 Trade \`${postId}\` is already frozen.`, ephemeral: true });
 
         trade.frozen = true;
         await refreshListingEmbed(guild, trade);
@@ -1184,8 +1178,8 @@ async function handleInteraction(interaction) {
       else if (sub === "unfreeze") {
         const postId = interaction.options.getString("postid");
         const trade  = activeTrades.get(postId);
-        if (!trade)         return interaction.reply({ content: `❌ Trade \`${postId}\` not found.`, ephemeral: true });
-        if (!trade.frozen)  return interaction.reply({ content: `🔥 Trade \`${postId}\` is not frozen.`, ephemeral: true });
+        if (!trade)        return interaction.reply({ content: `❌ Trade \`${postId}\` not found.`, ephemeral: true });
+        if (!trade.frozen) return interaction.reply({ content: `🔥 Trade \`${postId}\` is not frozen.`, ephemeral: true });
 
         trade.frozen = false;
         await refreshListingEmbed(guild, trade);
@@ -1198,8 +1192,8 @@ async function handleInteraction(interaction) {
       else if (sub === "pin") {
         const postId = interaction.options.getString("postid");
         const trade  = activeTrades.get(postId);
-        if (!trade)                    return interaction.reply({ content: `❌ Trade \`${postId}\` not found.`, ephemeral: true });
-        if (pinnedTrades.has(postId))  return interaction.reply({ content: `📌 Trade \`${postId}\` is already pinned.`, ephemeral: true });
+        if (!trade)                   return interaction.reply({ content: `❌ Trade \`${postId}\` not found.`, ephemeral: true });
+        if (pinnedTrades.has(postId)) return interaction.reply({ content: `📌 Trade \`${postId}\` is already pinned.`, ephemeral: true });
 
         pinnedTrades.add(postId);
         await refreshListingEmbed(guild, trade);
@@ -1212,8 +1206,8 @@ async function handleInteraction(interaction) {
       else if (sub === "unpin") {
         const postId = interaction.options.getString("postid");
         const trade  = activeTrades.get(postId);
-        if (!trade)                     return interaction.reply({ content: `❌ Trade \`${postId}\` not found.`, ephemeral: true });
-        if (!pinnedTrades.has(postId))  return interaction.reply({ content: `ℹ️ Trade \`${postId}\` is not pinned.`, ephemeral: true });
+        if (!trade)                    return interaction.reply({ content: `❌ Trade \`${postId}\` not found.`, ephemeral: true });
+        if (!pinnedTrades.has(postId)) return interaction.reply({ content: `ℹ️ Trade \`${postId}\` is not pinned.`, ephemeral: true });
 
         pinnedTrades.delete(postId);
         await refreshListingEmbed(guild, trade);
@@ -1240,7 +1234,7 @@ async function handleInteraction(interaction) {
       else if (sub === "removenote") {
         const postId = interaction.options.getString("postid");
         const trade  = activeTrades.get(postId);
-        if (!trade) return interaction.reply({ content: `❌ Trade \`${postId}\` not found.`, ephemeral: true });
+        if (!trade)                  return interaction.reply({ content: `❌ Trade \`${postId}\` not found.`, ephemeral: true });
         if (!tradeNotes.has(postId)) return interaction.reply({ content: `ℹ️ Trade \`${postId}\` has no admin note.`, ephemeral: true });
 
         tradeNotes.delete(postId);
@@ -1362,9 +1356,9 @@ async function handleInteraction(interaction) {
         await interaction.reply({
           embeds: [new EmbedBuilder().setColor(0x2ecc71).setTitle("🔄 Reputation Reset")
             .addFields(
-              { name: "User",      value: `${target.tag}`,                              inline: true },
+              { name: "User",      value: `${target.tag}`,                    inline: true },
               { name: "Old Score", value: `${prev.positive - prev.negative}`, inline: true },
-              { name: "New Score", value: `0`,                                           inline: true },
+              { name: "New Score", value: `0`,                                 inline: true },
             ).setTimestamp()],
           ephemeral: true,
         });
@@ -1385,25 +1379,28 @@ async function handleInteraction(interaction) {
 
       const offering   = interaction.fields.getTextInputValue("offering");
       const lookingFor = interaction.fields.getTextInputValue("looking_for");
-      const beli       = interaction.fields.getTextInputValue("beli");
-      const server     = interaction.fields.getTextInputValue("server");
       const notes      = interaction.fields.getTextInputValue("notes");
 
       const postId = `${++tradeCounter}`;
       const trade  = {
-        postId, userId: user.id,
-        offering, lookingFor,
-        beli: beli || null, server: server || "Any", notes: notes || null,
-        status: "open", createdAt: Date.now(),
-        listingChannelId: null, listingMessageId: null,
-        channelId: null, messageId: null,
-        views: 0, frozen: false,
+        postId,
+        userId:    user.id,
+        offering,
+        lookingFor,
+        notes:     notes || null,
+        status:    "open",
+        createdAt: Date.now(),
+        listingChannelId: null,
+        listingMessageId: null,
+        channelId:        null,
+        messageId:        null,
+        views:  0,
+        frozen: false,
       };
 
       activeTrades.set(postId, trade);
       botStats.tradesPosted++;
 
-      // Post to dedicated listing channel if configured
       const listingMsg = await postTradeToListingChannel(guild, trade);
 
       if (listingMsg) {
@@ -1425,14 +1422,13 @@ async function handleInteraction(interaction) {
             .setTimestamp()],
         });
       } else {
-        // Fallback: post inline
         const reply = await interaction.editReply({
           embeds: [buildTradeEmbed(trade, guild)],
           components: buildTradeButtons(trade),
           fetchReply: true,
         });
-        trade.channelId  = reply.channelId;
-        trade.messageId  = reply.id;
+        trade.channelId = reply.channelId;
+        trade.messageId = reply.id;
       }
 
       await logAction(guild, "📦 New Trade", `<@${user.id}> posted \`${postId}\`\n🎁 ${offering}\n🔍 ${lookingFor}`, 0x2ecc71);
@@ -1501,7 +1497,6 @@ async function handleInteraction(interaction) {
       if (!tradeOwner)
         return interaction.editReply({ content: "❌ Trade owner not found — they may have left the server." });
 
-      // Each user gets their own unique ticket — multiple allowed simultaneously
       const { channel, alreadyExisted } = await createTradeTicket(guild, user, tradeOwner.user, trade);
       if (alreadyExisted)
         return interaction.editReply({ content: `📬 You already have a ticket open for this trade: <#${channel.id}>` });
@@ -1509,7 +1504,6 @@ async function handleInteraction(interaction) {
       await postTicketIntro(channel, user, tradeOwner.user, trade);
       botStats.ticketsOpened++;
 
-      // Notify the trade owner via DM
       tradeOwner.user.send({ embeds: [new EmbedBuilder().setColor(0xf39c12)
         .setTitle("📬 Someone opened a ticket on your trade!")
         .setDescription(`**${user.tag}** wants to discuss your trade \`${postId}\`.\n\nGo to <#${channel.id}> to respond.`)
@@ -1638,7 +1632,7 @@ async function handleInteraction(interaction) {
         .setTitle(`🏪 Sailor Piece Marketplace — Page ${pageIdx + 1}/${pages.length}`)
         .setDescription(pages[pageIdx].map(t => {
           const isPinned = pinnedTrades.has(t.postId);
-          const rep = getRepData(t.userId);
+          const rep      = getRepData(t.userId);
           return `${isPinned ? "📌 " : ""}**\`${t.postId}\`** <@${t.userId}> ${getRepEmoji(rep)}\n🎁 ${t.offering.slice(0, 65)}\n🔍 ${t.lookingFor.slice(0, 65)}`;
         }).join("\n\n"))
         .setFooter({ text: `Page ${pageIdx + 1}/${pages.length} • /tradeinfo <postid> for details` });
